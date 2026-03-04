@@ -564,6 +564,16 @@
       color: rgba(240, 230, 215, 0.95);
     }
 
+    /* ── Card text contrast — mood-scoped overrides (3-class specificity) ───
+       Ensures all body and context text is clearly readable against card
+       surfaces in both modes. Context is slightly dimmer than body to
+       preserve the visual hierarchy between statement and context. */
+    .mood-morning .entry-card .entry-text    { color: rgba(40, 28, 16, 1); }
+    .mood-morning .entry-card .entry-context { color: rgba(60, 45, 30, 0.80); }
+
+    .mood-evening .entry-card .entry-text    { color: rgba(240, 230, 215, 0.95); }
+    .mood-evening .entry-card .entry-context { color: rgba(220, 205, 180, 0.82); }
+
     .entry-tags {
       display: flex;
       flex-wrap: wrap;
