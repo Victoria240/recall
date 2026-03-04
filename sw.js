@@ -1,6 +1,9 @@
 'use strict';
 
-const CACHE = 'recall-v1';
+// Bump this version on every deploy to bust stale caches.
+// Network-first for HTML means version bumps are no longer
+// required for app updates — but bump anyway for clean rollover.
+const CACHE = 'recall-v2';
 
 const PRECACHE_URLS = [
   './',
@@ -32,7 +35,7 @@ self.addEventListener('activate', evt => {
   );
 });
 
-// ── Fetch: cache-first for same-origin, passthrough for external ───────────────
+// ── Fetch ──────────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', evt => {
   const { request } = evt;
   const url = new URL(request.url);
@@ -40,23 +43,31 @@ self.addEventListener('fetch', evt => {
   // Always pass through cross-origin requests (API, fonts, etc.)
   if (url.origin !== self.location.origin) return;
 
-  // Cache-first strategy for local assets
+  // Network-first for HTML navigation — always fetches fresh app shell,
+  // falls back to cache only when offline.
+  if (request.mode === 'navigate' || request.destination === 'document') {
+    evt.respondWith(
+      fetch(request)
+        .then(response => {
+          if (response.ok) {
+            caches.open(CACHE).then(c => c.put(request, response.clone()));
+          }
+          return response;
+        })
+        .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  // Cache-first for static assets (images, icons, manifest)
   evt.respondWith(
     caches.match(request).then(cached => {
       if (cached) return cached;
-
       return fetch(request).then(response => {
-        // Cache successful GET responses
         if (response.ok && request.method === 'GET') {
-          const clone = response.clone();
-          caches.open(CACHE).then(c => c.put(request, clone));
+          caches.open(CACHE).then(c => c.put(request, response.clone()));
         }
         return response;
-      }).catch(() => {
-        // Offline fallback: return cached index.html for navigation
-        if (request.mode === 'navigate') {
-          return caches.match('./index.html');
-        }
       });
     })
   );
