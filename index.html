@@ -1,0 +1,3384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Recall</title>
+
+  <!-- PWA manifest + theme -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#9B6432">
+
+  <!-- iOS PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Recall">
+  <link rel="apple-touch-icon" href="src/icons/icon-192.svg">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+  <!-- Preload background images to prevent flash on mood switch -->
+  <link rel="preload" href="src/assets/morning.jpg" as="image">
+  <link rel="preload" href="src/assets/evening.jpg" as="image">
+  <style>
+
+    /* ====================================================
+       MOOD TOKENS — three complete environments
+    ==================================================== */
+
+    .mood-morning {
+      --bg:               #FAF7F2;
+      --surface:          #F2EDE4;
+      --surface-raised:   #F8F4EE;
+      --border:           #DDD4C4;
+      --border-subtle:    #EAE3D8;
+      --text-primary:     #2A1C10;
+      --text-secondary:   #7A6252;
+      --text-tertiary:    #AE9D8C;
+      --accent:           #9B6432;
+      --accent-subtle:    rgba(155, 100, 50, 0.10);
+      --accent-glow:      rgba(184, 115, 51, 0.18);
+      --glow-recent:      0 0 28px rgba(184, 115, 51, 0.20), 0 2px 10px rgba(184, 115, 51, 0.08);
+      --glow-card:        0 1px 4px rgba(44, 28, 16, 0.07);
+      --sidebar-bg:       #EEE6DA;
+      --sidebar-border:   #D8CEBC;
+      --thread-color:     rgba(155, 100, 50, 0.30);
+    }
+
+    .mood-evening {
+      --bg:               #0B0703;
+      --surface:          #150D07;
+      --surface-raised:   #1C120A;
+      --border:           #2C1C0C;
+      --border-subtle:    #1E1408;
+      --text-primary:     #F0DFBF;
+      --text-secondary:   #987050;
+      --text-tertiary:    #5C3D20;
+      --accent:           #D08818;
+      --accent-subtle:    rgba(208, 136, 24, 0.14);
+      --accent-glow:      rgba(208, 136, 24, 0.22);
+      --glow-recent:      0 0 40px rgba(208, 136, 24, 0.28), 0 4px 20px rgba(208, 136, 24, 0.12);
+      --glow-card:        0 2px 16px rgba(0, 0, 0, 0.5);
+      --sidebar-bg:       #0E0905;
+      --sidebar-border:   #1E1208;
+      --thread-color:     rgba(208, 136, 24, 0.25);
+    }
+
+
+
+    /* ====================================================
+       RESET & BASE
+    ==================================================== */
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      transition: color 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Fallback body colours — visible only before images load */
+    .mood-morning { background: #C8A870; }
+    .mood-evening { background: #100806; }
+
+
+    /* ====================================================
+       BACKGROUND IMAGES
+    ==================================================== */
+
+    /* Two image layers crossfade on mood switch */
+    .bg-layer {
+      position: fixed;
+      inset: 0;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      opacity: 0;
+      transition: opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 0;
+    }
+
+    .bg-morning { background-image: url('src/assets/morning.jpg'); }
+    .bg-evening { background-image: url('src/assets/evening.jpg'); }
+
+    .mood-morning .bg-morning { opacity: 1; }
+    .mood-evening .bg-evening { opacity: 1; }
+
+    /* Overlay — tints image for text legibility */
+    .bg-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      transition: background-color 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 1;
+    }
+
+    .mood-morning .bg-overlay { background-color: rgba(255, 248, 235, 0.88); }
+    .mood-evening .bg-overlay { background-color: rgba(20,  12,  5,   0.75); }
+
+
+
+
+    /* ====================================================
+       APP SHELL
+    ==================================================== */
+
+    .app {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      position: relative;
+      z-index: 10;
+    }
+
+
+    /* ====================================================
+       SIDEBAR
+    ==================================================== */
+
+    .sidebar {
+      width: 224px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 36px 0 32px;
+      transition:
+        background-color 0.7s cubic-bezier(0.4, 0, 0.2, 1),
+        border-color 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Sidebar: nearly opaque — no image bleed-through */
+    .mood-morning .sidebar {
+      background: rgba(245, 238, 225, 0.95);
+      border-right: 1px solid rgba(200, 180, 150, 0.3);
+    }
+
+    .mood-evening .sidebar {
+      background: rgba(18, 12, 8, 0.95);
+      border-right: 1px solid rgba(80, 60, 40, 0.3);
+    }
+
+    .brand {
+      padding: 0 28px;
+      margin-bottom: 44px;
+    }
+
+    .wordmark {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--text-primary);
+      line-height: 1;
+      margin-bottom: 5px;
+      transition: color 0.7s ease;
+    }
+
+    .tagline {
+      font-size: 10px;
+      font-weight: 400;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--text-tertiary);
+      transition: color 0.7s ease;
+    }
+
+    /* Nav */
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      padding: 0 14px;
+      flex: 1;
+    }
+
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 9px 14px;
+      border-radius: 7px;
+      border: none;
+      background: none;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--text-secondary);
+      text-align: left;
+      cursor: pointer;
+      letter-spacing: 0.01em;
+      transition: background 0.18s ease, color 0.18s ease;
+    }
+
+    .nav-btn:hover {
+      background: var(--accent-subtle);
+      color: var(--text-primary);
+    }
+
+    .nav-btn.active {
+      background: var(--accent-subtle);
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .nav-icon {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+      opacity: 0.6;
+      transition: opacity 0.18s ease;
+    }
+
+    .nav-btn.active .nav-icon,
+    .nav-btn:hover .nav-icon {
+      opacity: 1;
+    }
+
+    /* Mood switcher */
+    .mood-section {
+      padding: 0 14px;
+      margin-top: auto;
+    }
+
+    .mood-section-label {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-tertiary);
+      padding: 0 14px;
+      margin-bottom: 6px;
+      transition: color 0.7s ease;
+    }
+
+    .mood-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .mood-btn {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      padding: 8px 14px;
+      border-radius: 7px;
+      border: none;
+      background: none;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--text-tertiary);
+      text-align: left;
+      cursor: pointer;
+      letter-spacing: 0.01em;
+      transition: background 0.18s ease, color 0.18s ease;
+    }
+
+    .mood-btn:hover {
+      background: var(--accent-subtle);
+      color: var(--text-secondary);
+    }
+
+    .mood-btn.active {
+      background: var(--accent-subtle);
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    /* Garden pip rules removed — pips stripped from UI */
+
+
+    /* ====================================================
+       MAIN CONTENT
+    ==================================================== */
+
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 52px 64px 140px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .main::-webkit-scrollbar { width: 3px; }
+    .main::-webkit-scrollbar-track { background: transparent; }
+    .main::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+
+    /* Page header */
+    .page-header {
+      max-width: 660px;
+      margin-bottom: 56px;
+    }
+
+    .page-date {
+      font-size: 11px;
+      font-weight: 400;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+      transition: color 0.7s ease;
+    }
+
+    .mood-morning .page-date { color: rgba(90, 65, 40, 1); font-weight: 600; }
+    .mood-evening .page-date { color: rgba(220, 200, 170, 0.9); }
+
+    .page-title {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: clamp(34px, 3.8vw, 48px);
+      font-weight: 600;
+      letter-spacing: -0.015em;
+      color: var(--text-primary);
+      line-height: 1.08;
+      margin-bottom: 12px;
+      transition: color 0.7s ease;
+    }
+
+    .page-lead {
+      font-size: 14px;
+      font-weight: 300;
+      line-height: 1.6;
+      max-width: 440px;
+      transition: color 0.7s ease;
+    }
+
+    .mood-morning .page-lead { color: rgba(70, 48, 28, 1); }
+    .mood-evening .page-lead { color: rgba(220, 200, 170, 0.9); }
+
+
+    /* ====================================================
+       TIMELINE
+    ==================================================== */
+
+    .timeline {
+      max-width: 680px;
+    }
+
+
+    /* ====================================================
+       SECTION DIVIDERS
+    ==================================================== */
+
+    .section-divider {
+      margin-top: 32px;
+      margin-bottom: 12px;
+    }
+
+    .section-divider:first-child {
+      margin-top: 0;
+    }
+
+    .divider-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+      transition: color 0.7s ease;
+    }
+
+    .mood-morning .divider-label { color: rgba(120, 90, 60, 1); }
+    .mood-evening .divider-label { color: rgba(220, 180, 120, 1); }
+
+    .divider-rule { display: none; }
+
+
+    /* ====================================================
+       ENTRIES
+    ==================================================== */
+
+    /* Card places itself down like a note being set on a desk */
+    @keyframes card-place {
+      from {
+        opacity: 0;
+        transform: translateY(40px) rotate(3deg) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) rotate(var(--rot, -0.4deg)) scale(var(--scale, 1));
+      }
+    }
+
+    .entry {
+      position: relative;
+      margin-top: -8px;
+      margin-bottom: 0;
+    }
+
+    /* First card in each section: no overlap with the section label */
+    .section-divider + .entry,
+    .timeline > .entry:first-child { margin-top: 0; }
+
+    .entry--d1, .entry--d2, .entry--d3 { margin-left: 0; }
+
+    /* Card */
+    .entry-card {
+      border-radius: 10px;
+      padding: 22px 26px;
+      width: 85%;
+      margin-left: auto;
+      animation: card-place 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both paused;
+      transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .entry--wide .entry-card {
+      width: 100%;
+      margin-left: 0;
+    }
+
+    .mood-morning .entry-card {
+      background: rgba(255, 252, 245, 0.96);
+      border: 1px solid rgba(200, 180, 150, 0.3);
+      box-shadow:
+        0 1px 3px  rgba(80, 50, 20, 0.08),
+        0 4px 12px rgba(80, 50, 20, 0.06),
+        0 8px 24px rgba(80, 50, 20, 0.04);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: #2A1C10;
+    }
+
+    .mood-morning .entry--recent .entry-card {
+      background: rgba(255, 252, 245, 0.98);
+    }
+
+    .mood-evening .entry-card {
+      background: rgba(30, 22, 15, 0.97);
+      border: 1px solid rgba(180, 150, 100, 0.15);
+      box-shadow:
+        0 1px 3px  rgba(0, 0, 0, 0.20),
+        0 4px 12px rgba(0, 0, 0, 0.15),
+        0 8px 24px rgba(0, 0, 0, 0.10);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: #F0DFBF;
+    }
+
+    .mood-evening .entry--recent .entry-card {
+      background: rgba(30, 22, 15, 0.99);
+    }
+
+    /* Recency — subtle dimming and scale reduction with age */
+    .entry--age-yesterday .entry-card { opacity: 0.95; --scale: 0.995; }
+    .entry--age-older .entry-card     { opacity: 0.9;  --scale: 0.99; }
+
+    /* Rotation custom properties — the keyframe to: reads these */
+    .timeline > .entry:nth-child(odd) .entry-card  { --rot: -0.4deg; }
+    .timeline > .entry:nth-child(even) .entry-card { --rot:  0.3deg; }
+
+    /* Hover — pick the note off the pile */
+    .mood-morning .entry-card:hover {
+      transform: translateY(-12px) rotate(0deg) scale(1.008) !important;
+      box-shadow:
+        0 12px 32px rgba(80, 50, 20, 0.15),
+        0 4px  8px  rgba(80, 50, 20, 0.10) !important;
+      border-color: var(--accent);
+      opacity: 1 !important;
+    }
+
+    .mood-evening .entry-card:hover {
+      transform: translateY(-12px) rotate(0deg) scale(1.008) !important;
+      box-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.35),
+        0 4px  8px  rgba(0, 0, 0, 0.25) !important;
+      border-color: var(--accent);
+      opacity: 1 !important;
+    }
+
+    /* Tags become more vivid when card is in focus */
+    .mood-morning .entry-card:hover .tag {
+      border-color: rgba(200, 180, 150, 0.5);
+    }
+
+    .mood-evening .entry-card:hover .tag {
+      color: rgba(220, 195, 155, 1);
+      border-color: rgba(200, 170, 120, 0.6);
+    }
+
+    /* Card internals */
+    .entry-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .project-tag {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-subtle);
+      padding: 3px 8px;
+      border-radius: 3px;
+      transition: background 0.7s ease, color 0.7s ease;
+    }
+
+    .entry-time {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--text-tertiary);
+      transition: color 0.7s ease;
+    }
+
+    .mood-evening .entry-time { color: rgba(200, 175, 140, 0.7); }
+
+    .entry-text {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 17px;
+      font-weight: 400;
+      line-height: 1.68;
+      color: var(--text-primary);
+      margin-bottom: 16px;
+      transition: color 0.7s ease;
+    }
+
+    .entry--d2 .entry-text,
+    .entry--d3 .entry-text {
+      font-size: 16px;
+      color: var(--text-secondary);
+    }
+
+    .entry-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .tag {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--text-secondary);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      padding: 3px 9px;
+      border-radius: 20px;
+      letter-spacing: 0.01em;
+      transition: all 0.7s ease;
+    }
+
+    .mood-evening .tag {
+      color: rgba(220, 195, 155, 0.9);
+      border-color: rgba(200, 170, 120, 0.4);
+      background: transparent;
+    }
+
+    /* Spacer suppressed — section-divider margin-top handles group separation */
+    .group-gap { display: none; }
+
+
+    /* ====================================================
+       VOICE BUTTON
+    ==================================================== */
+
+    .voice-btn {
+      position: fixed;
+      bottom: 40px;
+      left: calc(224px + ((100vw - 224px) / 2));
+      transform: translateX(-50%);
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow:
+        0 0 0 0 var(--accent-glow),
+        0 4px 20px rgba(0,0,0,0.18);
+      transition:
+        background 0.7s ease,
+        transform 0.25s ease,
+        box-shadow 0.25s ease;
+      z-index: 200;
+    }
+
+    .voice-btn:hover {
+      transform: translateX(-50%) scale(1.07);
+      box-shadow:
+        0 0 0 8px var(--accent-subtle),
+        0 6px 28px rgba(0,0,0,0.22);
+    }
+
+    .voice-btn svg {
+      width: 21px;
+      height: 21px;
+    }
+
+    /* Subtle pulse ring on the voice button */
+    .voice-btn::after {
+      content: '';
+      position: absolute;
+      inset: -6px;
+      border-radius: 50%;
+      border: 1px solid var(--accent);
+      opacity: 0.25;
+      animation: voice-pulse 3s ease-in-out infinite;
+    }
+
+    @keyframes voice-pulse {
+      0%, 100% { transform: scale(1); opacity: 0.25; }
+      50%       { transform: scale(1.15); opacity: 0.08; }
+    }
+
+    /* ── Voice button states ──────────────────────────────────────────────── */
+    @keyframes voice-pulse-fast {
+      0%, 100% { transform: scale(1);    opacity: 0.55; }
+      50%       { transform: scale(1.3);  opacity: 0; }
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Recording — warm red, faster pulse ring */
+    .voice-btn--recording {
+      background: #B83A22;
+    }
+
+    .voice-btn--recording::after {
+      border-color: #B83A22;
+      animation: voice-pulse-fast 0.9s ease-in-out infinite;
+    }
+
+    /* Processing — spinner replaces mic icon */
+    .voice-btn--processing {
+      cursor: wait;
+    }
+
+    .voice-btn--processing .voice-icon {
+      display: none;
+    }
+
+    .voice-btn--processing::before {
+      content: '';
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      border: 2.5px solid rgba(255, 255, 255, 0.2);
+      border-top-color: rgba(255, 255, 255, 0.9);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    /* Error — brief red flash */
+    .voice-btn--error {
+      background: #B83A22;
+    }
+
+    .voice-btn--error::after {
+      display: none;
+    }
+
+    /* ── Context paragraph inside cards ──────────────────────────────────── */
+    .entry-context {
+      font-size: 13px;
+      font-weight: 300;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-top: -6px;
+      margin-bottom: 14px;
+      transition: color 0.7s ease;
+    }
+
+    /* ── Sidebar API key button ───────────────────────────────────────────── */
+    .api-key-btn {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      width: calc(100% - 28px);
+      margin: 12px 14px 0;
+      padding: 7px 14px;
+      border: none;
+      background: none;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px;
+      font-weight: 400;
+      letter-spacing: 0.04em;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      border-radius: 7px;
+      text-align: left;
+      transition: color 0.18s ease, background 0.18s ease;
+    }
+
+    .api-key-btn:hover {
+      color: var(--text-secondary);
+      background: var(--accent-subtle);
+    }
+
+    .api-key-btn svg {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      opacity: 0.7;
+    }
+
+    /* ── Toast notifications ─────────────────────────────────────────────── */
+    .recall-toast {
+      position: fixed;
+      bottom: 116px;
+      left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: rgba(24, 15, 8, 0.93);
+      color: rgba(235, 215, 185, 0.95);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 1.45;
+      padding: 11px 20px;
+      border-radius: 8px;
+      max-width: 380px;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      z-index: 300;
+    }
+
+    .recall-toast--visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ── API key modal ────────────────────────────────────────────────────── */
+    #api-key-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 400;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .akm-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(10, 6, 3, 0.55);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    #api-key-modal.akm-visible .akm-backdrop { opacity: 1; }
+
+    .akm-panel {
+      position: relative;
+      width: 420px;
+      max-width: calc(100vw - 48px);
+      border-radius: 12px;
+      padding: 32px;
+      transform: translateY(14px) scale(0.97);
+      opacity: 0;
+      transition:
+        transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
+        opacity   0.2s ease;
+      z-index: 1;
+    }
+
+    #api-key-modal.akm-visible .akm-panel {
+      transform: translateY(0) scale(1);
+      opacity: 1;
+    }
+
+    .mood-morning .akm-panel {
+      background: rgba(250, 246, 240, 0.98);
+      border: 1px solid rgba(200, 180, 150, 0.3);
+      box-shadow: 0 8px 40px rgba(80, 50, 20, 0.15), 0 2px 8px rgba(80, 50, 20, 0.08);
+    }
+
+    .mood-evening .akm-panel {
+      background: rgba(26, 16, 8, 0.98);
+      border: 1px solid rgba(180, 150, 100, 0.15);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .akm-title {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 10px;
+    }
+
+    .akm-desc {
+      font-size: 13px;
+      font-weight: 300;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      margin-bottom: 22px;
+    }
+
+    .akm-desc a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .akm-desc a:hover { text-decoration: underline; }
+
+    .akm-input {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 7px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      color: var(--text-primary);
+      outline: none;
+      margin-bottom: 18px;
+      transition: border-color 0.18s ease, background 0.18s ease;
+      letter-spacing: 0.02em;
+    }
+
+    .mood-morning .akm-input {
+      background: rgba(255, 252, 248, 0.9);
+      border: 1px solid rgba(200, 180, 150, 0.4);
+    }
+
+    .mood-evening .akm-input {
+      background: rgba(40, 26, 14, 0.85);
+      border: 1px solid rgba(180, 150, 100, 0.2);
+    }
+
+    .akm-input:focus { border-color: var(--accent); }
+
+    .akm-input--error { border-color: #B83A22 !important; }
+
+    .akm-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .akm-cancel, .akm-save {
+      padding: 9px 20px;
+      border-radius: 7px;
+      border: none;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.18s ease, background 0.18s ease;
+    }
+
+    .akm-cancel {
+      background: var(--accent-subtle);
+      color: var(--text-secondary);
+    }
+
+    .akm-cancel:hover { opacity: 0.75; }
+
+    .akm-save {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .akm-save:hover { opacity: 0.85; }
+
+    /* ── Transcript modal ──────────────────────────────────────────────── */
+    #transcript-modal {
+      position: fixed; inset: 0; z-index: 400;
+      display: flex; align-items: flex-end; justify-content: center;
+      padding: 0 0 env(safe-area-inset-bottom, 0);
+    }
+    .tm-backdrop {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.45);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+    .tm-panel {
+      position: relative; z-index: 1;
+      width: 100%; max-width: 600px;
+      margin: 0 auto;
+      border-radius: 20px 20px 0 0;
+      padding: 20px 20px 32px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .mood-morning .tm-panel {
+      background: rgba(252, 248, 240, 0.97);
+      border: 1px solid rgba(200,180,150,0.3);
+      border-bottom: none;
+    }
+    .mood-evening .tm-panel {
+      background: rgba(22, 14, 8, 0.97);
+      border: 1px solid rgba(120,90,60,0.2);
+      border-bottom: none;
+    }
+    .tm-header {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .tm-status-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
+    .tm-status-dot.tm-pulse {
+      animation: tm-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes tm-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.75); }
+    }
+    .tm-status-text {
+      font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+    }
+    .mood-morning .tm-status-text { color: rgba(80,55,30,0.85); }
+    .mood-evening .tm-status-text { color: rgba(200,175,140,0.9); }
+    .tm-textarea {
+      width: 100%; min-height: 100px; max-height: 240px;
+      resize: none; border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 15px; line-height: 1.55;
+      font-family: inherit;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .mood-morning .tm-textarea {
+      background: rgba(255,252,245,1);
+      border: 1px solid rgba(180,155,120,0.35);
+      color: #2A1C10;
+    }
+    .mood-evening .tm-textarea {
+      background: rgba(12,8,4,0.9);
+      border: 1px solid rgba(120,90,60,0.3);
+      color: rgba(235,215,185,0.95);
+    }
+    .tm-textarea::placeholder { opacity: 0.4; }
+    .tm-interim {
+      font-size: 14px; line-height: 1.5;
+      min-height: 20px;
+      font-style: italic;
+    }
+    .mood-morning .tm-interim { color: rgba(120,90,55,0.55); }
+    .mood-evening .tm-interim { color: rgba(180,150,110,0.5); }
+    .tm-actions {
+      display: flex; gap: 10px; justify-content: flex-end;
+    }
+    .tm-cancel, .tm-resume, .tm-save {
+      padding: 9px 20px; border-radius: 8px;
+      font-size: 14px; font-weight: 500;
+      cursor: pointer; border: none; transition: opacity 0.15s;
+    }
+    .tm-cancel {
+      background: transparent;
+    }
+    .mood-morning .tm-cancel { color: rgba(100,70,40,0.7); }
+    .mood-evening .tm-cancel { color: rgba(180,150,110,0.6); }
+    .tm-cancel:hover { opacity: 0.7; }
+    .tm-resume {
+      border-radius: 8px;
+    }
+    .mood-morning .tm-resume {
+      background: rgba(200,175,140,0.2);
+      color: rgba(80,55,30,0.9);
+      border: 1px solid rgba(180,155,120,0.3);
+    }
+    .mood-evening .tm-resume {
+      background: rgba(120,90,60,0.2);
+      color: rgba(220,195,155,0.9);
+      border: 1px solid rgba(120,90,60,0.3);
+    }
+    .tm-resume:hover { opacity: 0.8; }
+    .tm-resume--active {
+      animation: tm-pulse 1.2s ease-in-out infinite;
+    }
+    .tm-save {
+      background: var(--accent);
+      color: #fff;
+    }
+    .tm-save:hover { opacity: 0.85; }
+    .tm-save:disabled { opacity: 0.4; cursor: default; }
+
+    /* ── Card action icons ─────────────────────────────────────────────── */
+    .entry-card { position: relative; } /* needed for icon positioning */
+
+    .card-actions {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      gap: 8px;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      z-index: 2;
+    }
+    .entry-card:hover .card-actions { opacity: 1; }
+
+    .card-action-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      border-radius: 6px;
+      padding: 0;
+      transition: color 0.15s, background 0.15s;
+    }
+    .mood-morning .card-action-btn       { color: rgba(90,65,40,0.6); }
+    .mood-morning .card-action-btn:hover { color: rgba(90,65,40,1); background: rgba(90,65,40,0.08); }
+    .mood-evening .card-action-btn       { color: rgba(200,160,100,0.6); }
+    .mood-evening .card-action-btn:hover { color: rgba(200,160,100,1); background: rgba(200,160,100,0.1); }
+
+    /* ── Shared modal shell ─────────────────────────────────────────────── */
+    .recall-modal-wrap {
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .recall-modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+    .recall-modal {
+      position: relative;
+      z-index: 1;
+      border-radius: 12px;
+      padding: 24px;
+      animation: modal-in 0.2s cubic-bezier(0.34, 1.2, 0.64, 1) both;
+    }
+    @keyframes modal-in {
+      from { opacity: 0; transform: scale(0.96) translateY(8px); }
+      to   { opacity: 1; transform: scale(1)    translateY(0);   }
+    }
+    .recall-modal.modal-out {
+      animation: modal-out 0.15s ease both;
+    }
+    @keyframes modal-out {
+      from { opacity: 1; transform: scale(1)    translateY(0);   }
+      to   { opacity: 0; transform: scale(0.96) translateY(8px); }
+    }
+    .mood-morning .recall-modal {
+      background: rgba(255,252,245,0.98);
+      border: 1px solid rgba(200,180,150,0.3);
+      box-shadow: 0 8px 32px rgba(80,50,20,0.18), 0 2px 8px rgba(80,50,20,0.10);
+      color: #2A1C10;
+    }
+    .mood-evening .recall-modal {
+      background: rgba(22,14,8,0.98);
+      border: 1px solid rgba(120,90,60,0.25);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
+      color: #F0DFBF;
+    }
+    .recall-modal h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    /* ── Delete modal ────────────────────────────────────────────────────── */
+    .del-modal { width: 100%; max-width: 400px; }
+    .del-preview {
+      font-size: 13px;
+      line-height: 1.5;
+      margin-bottom: 24px;
+      font-style: italic;
+      opacity: 0.65;
+    }
+    .del-actions { display: flex; justify-content: flex-end; gap: 10px; }
+    .del-cancel, .del-confirm {
+      padding: 9px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s;
+      font-family: inherit;
+    }
+    .del-cancel { background: transparent; }
+    .mood-morning .del-cancel { color: rgba(100,70,40,0.7); }
+    .mood-evening .del-cancel { color: rgba(180,150,110,0.6); }
+    .del-cancel:hover { opacity: 0.7; }
+    .del-confirm { background: #C0392B; color: #fff; }
+    .del-confirm:hover { opacity: 0.85; }
+
+    /* ── Edit modal ──────────────────────────────────────────────────────── */
+    .edit-modal { width: 100%; max-width: 600px; }
+    .edit-field { margin-bottom: 16px; }
+    .edit-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      opacity: 0.6;
+    }
+    .edit-label-note {
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+      opacity: 0.5;
+      font-size: 11px;
+    }
+    .edit-select, .edit-textarea, .edit-input {
+      width: 100%;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      box-sizing: border-box;
+      transition: border-color 0.15s;
+    }
+    .mood-morning .edit-select,
+    .mood-morning .edit-textarea,
+    .mood-morning .edit-input {
+      background: rgba(255,252,245,1);
+      border: 1px solid rgba(180,155,120,0.4);
+      color: #2A1C10;
+    }
+    .mood-evening .edit-select,
+    .mood-evening .edit-textarea,
+    .mood-evening .edit-input {
+      background: rgba(12,8,4,0.9);
+      border: 1px solid rgba(120,90,60,0.35);
+      color: rgba(235,215,185,0.95);
+    }
+    .mood-morning .edit-select:focus,
+    .mood-morning .edit-textarea:focus,
+    .mood-morning .edit-input:focus { border-color: rgba(155,100,50,0.7); }
+    .mood-evening .edit-select:focus,
+    .mood-evening .edit-textarea:focus,
+    .mood-evening .edit-input:focus { border-color: rgba(208,136,24,0.6); }
+    .edit-select { appearance: none; -webkit-appearance: none; cursor: pointer; }
+    .edit-textarea { resize: vertical; line-height: 1.55; text-indent: 0; }
+    .edit-textarea--statement {
+      min-height: 80px;
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 17px;
+      font-weight: 400;
+      line-height: 1.68;
+    }
+    .edit-textarea--context {
+      min-height: 54px;
+      font-size: 13px;
+      font-weight: 300;
+      line-height: 1.5;
+    }
+    .edit-error {
+      font-size: 12px;
+      color: #C0392B;
+      margin-top: 5px;
+      display: none;
+    }
+    .edit-error--visible { display: block; }
+    .edit-tag-preview {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 8px;
+      min-height: 22px;
+    }
+    .edit-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+    .edit-cancel, .edit-save {
+      padding: 9px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s;
+      font-family: inherit;
+    }
+    .edit-cancel { background: transparent; }
+    .mood-morning .edit-cancel { color: rgba(100,70,40,0.7); }
+    .mood-evening .edit-cancel { color: rgba(180,150,110,0.6); }
+    .edit-cancel:hover { opacity: 0.7; }
+    .edit-save { background: var(--accent); color: #fff; }
+    .edit-save:hover { opacity: 0.85; }
+
+    /* ── Card delete exit animation ──────────────────────────────────────── */
+    @keyframes card-delete {
+      from { opacity: 1; transform: translateY(0)     scale(1);    }
+      to   { opacity: 0; transform: translateY(-20px) scale(0.95); }
+    }
+
+
+    /* ====================================================
+       MOBILE — hamburger nav + dropdown menu
+    ==================================================== */
+
+    /* Hamburger button — hidden on desktop */
+    .hamburger-btn {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border: none;
+      background: none;
+      cursor: pointer;
+      border-radius: 8px;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .hamburger-btn:hover { background: var(--accent-subtle); color: var(--text-primary); }
+    .hamburger-btn svg { pointer-events: none; }
+
+    /* Mobile dropdown menu panel */
+    .mobile-menu {
+      display: none;
+      position: fixed;
+      top: 56px;
+      left: 0;
+      right: 0;
+      z-index: 150;
+      padding: 8px 0 12px;
+      border-bottom: 1px solid var(--sidebar-border);
+      backdrop-filter: blur(20px) saturate(1.5);
+      -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    }
+    .mood-morning .mobile-menu { background: rgba(242,237,228,0.98); }
+    .mood-evening .mobile-menu { background: rgba(12,8,4,0.98); }
+    .mobile-menu.mm-open {
+      display: block;
+      animation: menu-slide 0.18s ease both;
+    }
+    @keyframes menu-slide {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .mm-nav { display: flex; flex-direction: column; padding: 4px 12px; gap: 1px; }
+    .mm-nav-btn {
+      display: flex; align-items: center; gap: 10px;
+      padding: 13px 14px; border-radius: 8px; border: none;
+      background: none; font-family: 'DM Sans', sans-serif;
+      font-size: 14px; font-weight: 400; color: var(--text-secondary);
+      text-align: left; cursor: pointer; width: 100%;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .mm-nav-btn:hover { background: var(--accent-subtle); color: var(--text-primary); }
+    .mm-nav-btn.active { background: var(--accent-subtle); color: var(--accent); font-weight: 500; }
+    .mm-divider { height: 1px; margin: 6px 16px; background: var(--border-subtle); }
+    .mm-mood { display: flex; flex-direction: row; gap: 8px; padding: 6px 12px 4px; }
+    .mm-mood-btn {
+      flex: 1; padding: 10px 8px; border-radius: 8px; border: none;
+      background: none; font-family: 'DM Sans', sans-serif;
+      font-size: 13px; font-weight: 400; color: var(--text-secondary);
+      cursor: pointer; text-align: center;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .mm-mood-btn:hover { background: var(--accent-subtle); color: var(--text-primary); }
+    .mm-mood-btn.active { background: var(--accent-subtle); color: var(--accent); font-weight: 500; }
+
+    @media (max-width: 768px) {
+      .app { flex-direction: column; }
+
+      .sidebar {
+        width: 100%;
+        height: 56px;
+        flex-direction: row;
+        align-items: center;
+        padding: 0 20px;
+        border-right: none !important;
+        border-bottom: 1px solid var(--sidebar-border);
+        gap: 0;
+        flex-shrink: 0;
+      }
+
+      .brand { padding: 0; margin-bottom: 0; flex: 1; }
+      .wordmark { font-size: 18px; margin-bottom: 0; }
+      .tagline { display: none; }
+
+      /* Sidebar nav/mood hidden — moved to mobile-menu */
+      .nav { display: none; }
+      .mood-section { display: none; }
+      .api-key-btn { display: none; }
+
+      /* Show hamburger */
+      .hamburger-btn { display: flex; }
+
+      .main { padding: 28px 20px 120px; }
+
+      /* No stepping on mobile, full-width cards */
+      .entry--d1, .entry--d2, .entry--d3 { margin-left: 0; }
+      .entry-card, .entry--wide .entry-card { width: 100%; margin-left: 0; }
+
+      .voice-btn { bottom: 24px; left: 50%; }
+    }
+
+    @media (max-width: 480px) {
+      .main { padding: 24px 16px 120px; }
+      .page-title { font-size: 28px; }
+      .entry-card { padding: 18px 18px; }
+      .entry-text { font-size: 15px; }
+    }
+
+    /* ====================================================
+       REVIEW VIEW
+    ==================================================== */
+
+    /* View switching — hidden attribute support */
+    .view[hidden] { display: none !important; }
+
+    /* Review header */
+    .review-header {
+      max-width: 660px;
+      margin-bottom: 40px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .review-header-text { flex: 1; }
+
+    .new-convo-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      border-radius: 24px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin-top: 4px;
+      transition: background 0.2s, color 0.2s, border-color 0.2s, transform 0.15s;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .new-convo-btn--visible {
+      opacity: 1;
+      pointer-events: all;
+    }
+    .new-convo-btn:active { transform: scale(0.98); }
+    .mood-morning .new-convo-btn {
+      background: rgba(90,65,40,0.1);
+      border: 1px solid rgba(90,65,40,0.2);
+      color: rgba(90,65,40,1);
+    }
+    .mood-morning .new-convo-btn:hover {
+      background: rgba(90,65,40,0.16);
+      border-color: rgba(90,65,40,0.3);
+      color: rgba(90,65,40,1);
+      transform: scale(1.02);
+    }
+    .mood-evening .new-convo-btn {
+      background: rgba(200,160,100,0.15);
+      border: 1px solid rgba(200,160,100,0.25);
+      color: rgba(200,160,100,1);
+    }
+    .mood-evening .new-convo-btn:hover {
+      background: rgba(200,160,100,0.18);
+      border-color: rgba(200,160,100,0.32);
+      color: rgba(220,180,120,1);
+      transform: scale(1.02);
+    }
+
+    /* Chat messages container */
+    .review-messages {
+      max-width: 720px;
+    }
+
+    /* Empty state — starter questions */
+    .review-empty {
+      padding: 24px 0 48px;
+    }
+
+    .sq-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+      max-width: 640px;
+    }
+
+    .sq-card {
+      padding: 14px 20px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1.5;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, color 0.15s ease;
+      animation: rm-in 0.3s ease both;
+      user-select: none;
+    }
+
+    /* Staggered widths and alignment for organic feel */
+    .sq-card:nth-child(1) { width: 88%; align-self: flex-end;   animation-delay: 0.04s; }
+    .sq-card:nth-child(2) { width: 80%; align-self: flex-start; animation-delay: 0.10s; }
+    .sq-card:nth-child(3) { width: 92%; align-self: flex-end;   animation-delay: 0.16s; }
+    .sq-card:nth-child(4) { width: 84%; align-self: flex-start; animation-delay: 0.22s; }
+    .sq-card:nth-child(5) { width: 78%; align-self: center;     animation-delay: 0.28s; }
+
+    .mood-morning .sq-card {
+      background: rgba(255,252,245,0.88);
+      border: 1px solid rgba(200,180,150,0.3);
+      box-shadow: 0 1px 3px rgba(80,50,20,0.07), 0 4px 12px rgba(80,50,20,0.05);
+      color: rgba(80,55,30,0.75);
+    }
+    .mood-morning .sq-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 4px 18px rgba(80,50,20,0.14), 0 2px 6px rgba(80,50,20,0.08);
+      border-color: rgba(155,100,50,0.5);
+      color: #2A1C10;
+    }
+    .mood-evening .sq-card {
+      background: rgba(30,22,15,0.88);
+      border: 1px solid rgba(180,150,100,0.14);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.12);
+      color: rgba(210,185,145,0.65);
+    }
+    .mood-evening .sq-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 4px 18px rgba(0,0,0,0.30), 0 2px 6px rgba(0,0,0,0.18);
+      border-color: rgba(208,136,24,0.35);
+      color: rgba(240,220,185,0.95);
+    }
+
+    /* User message */
+    .rm-user {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 14px;
+      animation: rm-in 0.22s ease both;
+    }
+    .rm-user-bubble {
+      max-width: 70%;
+      padding: 12px 16px;
+      border-radius: 16px 16px 4px 16px;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .mood-morning .rm-user-bubble {
+      background: rgba(200,175,140,0.2);
+      border: 1px solid rgba(200,180,150,0.3);
+      color: rgba(60,40,20,0.85);
+    }
+    .mood-evening .rm-user-bubble {
+      background: rgba(80,60,30,0.25);
+      border: 1px solid rgba(120,90,60,0.25);
+      color: rgba(220,195,155,0.85);
+    }
+
+    /* AI message */
+    .rm-ai {
+      margin-bottom: 16px;
+      animation: rm-in 0.22s ease both;
+    }
+    .rm-ai-card {
+      padding: 20px 24px;
+      border-radius: 10px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    .mood-morning .rm-ai-card {
+      background: rgba(255,252,245,0.96);
+      border: 1px solid rgba(200,180,150,0.3);
+      box-shadow: 0 1px 3px rgba(80,50,20,0.08), 0 4px 12px rgba(80,50,20,0.06);
+      color: #2A1C10;
+    }
+    .mood-evening .rm-ai-card {
+      background: rgba(30,22,15,0.97);
+      border: 1px solid rgba(180,150,100,0.15);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.20), 0 4px 12px rgba(0,0,0,0.15);
+      color: #F0DFBF;
+    }
+
+    /* Markdown content inside AI card */
+    .rm-ai-content p          { font-size: 14px; line-height: 1.65; margin-bottom: 12px; }
+    .rm-ai-content p:last-child { margin-bottom: 0; }
+    .rm-ai-content strong     { font-weight: 600; }
+    .rm-ai-content em         { font-style: italic; }
+
+    /* Typing indicator */
+    .rm-typing {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+    .rm-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      animation: rm-bounce 1.2s ease-in-out infinite;
+    }
+    .mood-morning .rm-dot { background: rgba(155,100,50,0.5); }
+    .mood-evening .rm-dot { background: rgba(208,136,24,0.5); }
+    .rm-dot:nth-child(2) { animation-delay: 0.16s; }
+    .rm-dot:nth-child(3) { animation-delay: 0.32s; }
+    @keyframes rm-bounce {
+      0%, 80%, 100% { transform: translateY(0);   opacity: 0.4; }
+      40%           { transform: translateY(-6px); opacity: 1;   }
+    }
+    @keyframes rm-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0);    }
+    }
+
+    /* Review input bar — fixed at bottom, respects sidebar width */
+    .review-input-bar {
+      position: fixed;
+      bottom: 0;
+      left: 224px;
+      right: 0;
+      padding: 16px 64px 28px;
+      z-index: 100;
+      display: none;
+      pointer-events: none;
+    }
+    .review-input-bar.rv-visible {
+      display: block;
+    }
+    .mood-morning .review-input-bar {
+      background: linear-gradient(to top, rgba(250,247,242,0.98) 65%, transparent);
+    }
+    .mood-evening .review-input-bar {
+      background: linear-gradient(to top, rgba(11,7,3,0.98) 65%, transparent);
+    }
+    .review-input-wrap {
+      max-width: 720px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      pointer-events: all;
+    }
+    .review-input {
+      width: 100%;
+      height: 48px;
+      padding: 0 92px 0 20px;
+      border-radius: 24px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      box-sizing: border-box;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .mood-morning .review-input {
+      background: rgba(255,252,245,0.98);
+      border: 1px solid rgba(180,155,120,0.4);
+      color: #2A1C10;
+      box-shadow: 0 2px 8px rgba(80,50,20,0.08);
+    }
+    .mood-morning .review-input::placeholder { color: rgba(120,90,60,0.4); }
+    .mood-morning .review-input:focus {
+      border-color: rgba(155,100,50,0.65);
+      box-shadow: 0 2px 14px rgba(80,50,20,0.12);
+    }
+    .mood-evening .review-input {
+      background: rgba(22,14,8,0.98);
+      border: 1px solid rgba(120,90,60,0.35);
+      color: rgba(235,215,185,0.95);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .mood-evening .review-input::placeholder { color: rgba(180,150,110,0.35); }
+    .mood-evening .review-input:focus {
+      border-color: rgba(208,136,24,0.5);
+      box-shadow: 0 2px 14px rgba(0,0,0,0.35);
+    }
+    .review-send-btn {
+      position: absolute;
+      right: 7px;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.15s;
+      background: var(--accent);
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .review-send-btn:disabled { opacity: 0.3; cursor: default; }
+    .review-send-btn:not(:disabled):hover { opacity: 0.85; transform: scale(1.06); }
+
+    /* Review mic button — sits left of send button */
+    .review-mic-btn {
+      position: absolute;
+      right: 46px;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+      background: transparent;
+      flex-shrink: 0;
+    }
+    .mood-morning .review-mic-btn       { color: rgba(90,65,40,0.5); }
+    .mood-morning .review-mic-btn:hover { color: rgba(90,65,40,1); background: rgba(90,65,40,0.08); }
+    .mood-evening .review-mic-btn       { color: rgba(200,160,100,0.5); }
+    .mood-evening .review-mic-btn:hover { color: rgba(200,160,100,1); background: rgba(200,160,100,0.1); }
+    .review-mic-btn--recording {
+      color: #C0392B !important;
+      background: rgba(192,57,43,0.08) !important;
+      animation: tm-pulse 1.2s ease-in-out infinite;
+    }
+
+    /* Screen-reader only label */
+    .sr-only {
+      position: absolute;
+      width: 1px; height: 1px;
+      padding: 0; margin: -1px;
+      overflow: hidden;
+      clip: rect(0,0,0,0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 768px) {
+      .review-input-bar {
+        left: 0;
+        padding: 12px 16px max(20px, env(safe-area-inset-bottom, 20px));
+      }
+    }
+
+    /* ====================================================
+       MOBILE IMPROVEMENTS
+    ==================================================== */
+
+    @media (max-width: 768px) {
+      /* API key button: hide in mobile header bar (no space) */
+      .api-key-btn { display: none; }
+
+      /* Review header: stack vertically — no room for side-by-side */
+      .review-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 28px;
+      }
+      .new-convo-btn { margin-top: 0; align-self: flex-start; }
+
+      /* Touch targets: 44px minimum */
+      .nav-btn        { min-height: 44px; }
+      .mood-btn       { min-height: 44px; }
+      .card-action-btn { width: 38px; height: 38px; }
+
+      /* Review input: larger touch targets for mic + send */
+      .review-mic-btn  { width: 40px; height: 40px; right: 52px; }
+      .review-send-btn { width: 40px; height: 40px; }
+      .review-input    { padding: 0 100px 0 20px; }
+
+      /* Full-screen bottom-sheet for edit/delete modals */
+      .recall-modal-wrap {
+        padding: 0;
+        align-items: flex-end;
+      }
+      .recall-modal {
+        border-radius: 20px 20px 0 0;
+        max-width: 100% !important;
+        width: 100% !important;
+        padding: 28px 20px max(28px, env(safe-area-inset-bottom, 28px));
+        max-height: 92dvh;
+        overflow-y: auto;
+        animation: modal-slide-up 0.28s cubic-bezier(0.34, 1.1, 0.64, 1) both;
+      }
+      @keyframes modal-slide-up {
+        from { opacity: 0; transform: translateY(48px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .recall-modal.modal-out {
+        animation: modal-slide-down 0.18s ease both;
+      }
+      @keyframes modal-slide-down {
+        from { opacity: 1; transform: translateY(0); }
+        to   { opacity: 0; transform: translateY(48px); }
+      }
+
+      /* Transcript modal: taller panel on mobile */
+      #transcript-modal .tm-panel {
+        max-height: 88dvh;
+        padding-bottom: max(32px, env(safe-area-inset-bottom, 32px));
+        overflow-y: auto;
+        border-radius: 20px 20px 0 0;
+      }
+
+      /* Starter cards: uniform width on small screens */
+      .sq-card {
+        width: 100% !important;
+        align-self: stretch !important;
+      }
+    }
+
+    @media (max-width: 480px) {
+      /* Voice button: safe-area-aware bottom spacing */
+      .voice-btn {
+        bottom: max(20px, env(safe-area-inset-bottom, 20px));
+      }
+    }
+
+    /* ====================================================
+       PWA INSTALL BANNER
+    ==================================================== */
+
+    .install-banner {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 600;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px max(16px, env(safe-area-inset-bottom, 16px));
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      animation: rm-in 0.3s ease both;
+    }
+    .mood-morning .install-banner {
+      background: rgba(245,238,225,0.97);
+      border-top: 1px solid rgba(200,180,150,0.3);
+      color: rgba(60,40,20,0.85);
+      backdrop-filter: blur(8px);
+    }
+    .mood-evening .install-banner {
+      background: rgba(18,12,8,0.97);
+      border-top: 1px solid rgba(80,60,40,0.3);
+      color: rgba(220,195,155,0.8);
+      backdrop-filter: blur(8px);
+    }
+    .install-banner span { flex: 1; line-height: 1.4; }
+    .install-btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: opacity 0.15s;
+    }
+    .install-btn:hover { opacity: 0.85; }
+    .install-dismiss {
+      background: transparent;
+      border: none;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      opacity: 0.45;
+      padding: 4px;
+      font-family: inherit;
+      flex-shrink: 0;
+      transition: opacity 0.15s;
+    }
+    .mood-morning .install-dismiss { color: rgba(60,40,20,1); }
+    .mood-evening .install-dismiss { color: rgba(220,195,155,1); }
+    .install-dismiss:hover { opacity: 0.85; }
+
+  </style>
+</head>
+<body class="mood-morning">
+
+  <!-- Background image layers — crossfade on mood switch -->
+  <div class="bg-layer bg-morning" aria-hidden="true"></div>
+  <div class="bg-layer bg-evening" aria-hidden="true"></div>
+  <div class="bg-overlay" aria-hidden="true"></div>
+
+
+  <div class="app">
+
+    <!-- ========================
+         SIDEBAR
+    ========================= -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="wordmark">Recall</div>
+        <div class="tagline">Design memory</div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-btn active" data-view="memory">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <path d="M2 4h12M2 8h8M2 12h10"/>
+          </svg>
+          Memory
+        </button>
+        <button class="nav-btn" data-view="review">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="12" height="12" rx="2"/>
+            <path d="M5 6h6M5 9h4"/>
+          </svg>
+          Review
+        </button>
+        <button class="nav-btn">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="7" cy="7" r="4.5"/>
+            <path d="M10.5 10.5L14 14"/>
+          </svg>
+          Search
+        </button>
+      </nav>
+
+      <div class="mood-section">
+        <p class="mood-section-label">Mood</p>
+        <div class="mood-buttons">
+          <button class="mood-btn active" data-mood="morning">
+            Morning
+          </button>
+          <button class="mood-btn" data-mood="evening">
+            Evening
+          </button>
+        </div>
+      </div>
+
+      <button class="api-key-btn" aria-label="Update Anthropic API key">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="7" r="3"/>
+          <path d="M9 9.5l5 4.5M11.5 11.5l1.5-1.5"/>
+        </svg>
+        API key
+      </button>
+
+      <button class="hamburger-btn" id="hamburger-btn" aria-label="Open navigation menu" aria-expanded="false">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <path d="M3 5h12M3 9h12M3 13h12"/>
+        </svg>
+      </button>
+    </aside>
+
+    <!-- Mobile navigation dropdown -->
+    <div id="mobile-menu" class="mobile-menu" aria-hidden="true" role="dialog" aria-label="Navigation menu">
+      <nav class="mm-nav">
+        <button class="mm-nav-btn active" data-view="memory">Memory</button>
+        <button class="mm-nav-btn" data-view="review">Review</button>
+        <button class="mm-nav-btn">Search</button>
+      </nav>
+      <div class="mm-divider"></div>
+      <div class="mm-mood">
+        <button class="mm-mood-btn active" data-mood="morning">Morning</button>
+        <button class="mm-mood-btn" data-mood="evening">Evening</button>
+      </div>
+    </div>
+
+
+    <!-- ========================
+         MAIN
+    ========================= -->
+    <main class="main">
+      <div id="view-memory" class="view">
+      <header class="page-header">
+        <p class="page-date">Sunday, 2 March 2026</p>
+        <h1 class="page-title">Your memory.</h1>
+        <p class="page-lead">The decisions, instincts, and caught moments that don't make it into the file.</p>
+      </header>
+
+      <div class="timeline">
+
+        <!-- TODAY -->
+        <div class="section-divider">
+          <span class="divider-label">Today</span>
+          <div class="divider-rule"></div>
+        </div>
+
+        <div class="entry entry--recent entry--d1 entry--age-today entry--wide">
+          <div class="entry-card">
+            <div class="entry-meta">
+              <span class="project-tag">Onboarding</span>
+              <span class="entry-time">2 hours ago</span>
+            </div>
+            <p class="entry-text">
+              Pushed back on the five-tab navigation. Users won't understand what
+              "Insights" means until they've been in the product for a month.
+              Proposed starting with three tabs and unlocking the rest progressively —
+              the same pattern Linear uses. Team agreed to test it next sprint.
+            </p>
+            <div class="entry-tags">
+              <span class="tag">Navigation</span>
+              <span class="tag">Pushback</span>
+              <span class="tag">Progressive disclosure</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="group-gap"></div>
+
+        <!-- YESTERDAY -->
+        <div class="section-divider">
+          <span class="divider-label">Yesterday</span>
+          <div class="divider-rule"></div>
+        </div>
+
+        <div class="entry entry--d1 entry--age-yesterday">
+          <div class="entry-card">
+            <div class="entry-meta">
+              <span class="project-tag">Approvals</span>
+              <span class="entry-time">4:12 pm</span>
+            </div>
+            <p class="entry-text">
+              Caught an edge case in the approval flow — what happens when all approvers
+              are out of office simultaneously? Designed a fallback to the team lead
+              with a visible "escalated" state. This would have shipped without it.
+            </p>
+            <div class="entry-tags">
+              <span class="tag">Edge case</span>
+              <span class="tag">Error state</span>
+              <span class="tag">Caught it</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="entry entry--d2 entry--age-yesterday entry--wide">
+          <div class="entry-card">
+            <div class="entry-meta">
+              <span class="project-tag">Filter panel</span>
+              <span class="entry-time">11:20 am</span>
+            </div>
+            <p class="entry-text">
+              Drawer, not modal. Modals block the content the user is trying to filter.
+              Seems like a small decision. The reasoning matters — and six months from now
+              I want to be able to explain it without reconstructing it from nothing.
+            </p>
+            <div class="entry-tags">
+              <span class="tag">Component decision</span>
+              <span class="tag">Drawer</span>
+              <span class="tag">Rationale</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="group-gap"></div>
+
+        <!-- LAST WEEK -->
+        <div class="section-divider">
+          <span class="divider-label">Last week</span>
+          <div class="divider-rule"></div>
+        </div>
+
+        <div class="entry entry--d2 entry--age-older">
+          <div class="entry-card">
+            <div class="entry-meta">
+              <span class="project-tag">Analytics</span>
+              <span class="entry-time">26 Feb</span>
+            </div>
+            <p class="entry-text">
+              Spent two hours on the empty state for the data table. Nobody else
+              thought it mattered. New users hit empty states first — it's the
+              first impression of whether the product is finished.
+            </p>
+            <div class="entry-tags">
+              <span class="tag">Empty state</span>
+              <span class="tag">Quality detail</span>
+              <span class="tag">First impression</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="entry entry--d3 entry--age-older entry--wide">
+          <div class="entry-card">
+            <div class="entry-meta">
+              <span class="project-tag">Auth flow</span>
+              <span class="entry-time">24 Feb</span>
+            </div>
+            <p class="entry-text">
+              Influenced the decision to skip email verification on signup.
+              34% drop-off at that step. Proposed magic link as a deferred
+              step — verify when the user does something that matters,
+              not while they're still deciding if the product is worth it.
+            </p>
+            <div class="entry-tags">
+              <span class="tag">Influenced decision</span>
+              <span class="tag">Conversion</span>
+              <span class="tag">Data-backed</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="entry entry--d2 entry--age-older">
+          <div class="entry-card">
+            <div class="entry-meta">
+              <span class="project-tag">Design system</span>
+              <span class="entry-time">23 Feb</span>
+            </div>
+            <p class="entry-text">
+              Pushed back on creating a new "status badge" component. We already
+              have a tag component that does 90% of the same job. New component
+              means new documentation, new QA, new maintenance surface.
+              Reused and extended instead.
+            </p>
+            <div class="entry-tags">
+              <span class="tag">Reuse</span>
+              <span class="tag">Scope reduction</span>
+              <span class="tag">Systems</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="entry entry--d1 entry--age-older entry--wide">
+          <div class="entry-card">
+            <div class="entry-meta">
+              <span class="project-tag">Notifications</span>
+              <span class="entry-time">21 Feb</span>
+            </div>
+            <p class="entry-text">
+              Made the decision to default notifications to off for all
+              non-critical events. Marketing wanted them on. The research
+              is clear: aggressive defaults train users to ignore or uninstall.
+              Quiet defaults build trust. You can always turn them on — you
+              can't undo resentment.
+            </p>
+            <div class="entry-tags">
+              <span class="tag">Decision</span>
+              <span class="tag">User trust</span>
+              <span class="tag">Pushed back</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="entry entry--d2 entry--age-older">
+          <div class="entry-card">
+            <div class="entry-meta">
+              <span class="project-tag">Table view</span>
+              <span class="entry-time">20 Feb</span>
+            </div>
+            <p class="entry-text">
+              Column resizing is a trap. Users ask for it, engineers build it,
+              and it breaks every fixed-width assumption downstream. Argued for
+              fluid columns with minimum widths instead. Less user control,
+              but a layout that doesn't break.
+            </p>
+            <div class="entry-tags">
+              <span class="tag">Trade-off</span>
+              <span class="tag">Constraints</span>
+              <span class="tag">Complexity cost</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      </div><!-- /view-memory -->
+
+      <div id="view-review" class="view" hidden>
+        <header class="review-header">
+          <div class="review-header-text">
+            <h1 class="page-title">Review</h1>
+            <p class="page-lead">Ask questions about your work. Recall finds relevant memories and helps you see patterns.</p>
+          </div>
+          <button class="new-convo-btn" id="new-convo-btn" aria-label="Start new conversation">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 8a6 6 0 1 1 6 6"/>
+              <path d="M2 8V5M2 8H5"/>
+            </svg>
+            New conversation
+          </button>
+        </header>
+        <div class="review-messages" id="review-messages">
+          <div class="review-empty" id="review-empty">
+            <div class="sq-grid">
+              <div class="sq-card" data-question="What patterns do I see in how I push back on features?">What patterns do I see in how I push back on features?</div>
+              <div class="sq-card" data-question="Show me times I've caught edge cases">Show me times I've caught edge cases</div>
+              <div class="sq-card" data-question="How do I handle disagreement with stakeholders?">How do I handle disagreement with stakeholders?</div>
+              <div class="sq-card" data-question="What decisions have I made about progressive disclosure?">What decisions have I made about progressive disclosure?</div>
+              <div class="sq-card" data-question="When have I advocated for user needs over business goals?">When have I advocated for user needs over business goals?</div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /view-review -->
+    </main>
+
+  </div>
+
+  <!-- ========================
+       REVIEW INPUT BAR
+  ========================= -->
+  <div class="review-input-bar" id="review-input-bar" role="search">
+    <div class="review-input-wrap">
+      <label class="sr-only" for="review-input">Ask about your memories</label>
+      <input
+        type="text"
+        id="review-input"
+        class="review-input"
+        placeholder="Ask about a decision, pattern, or specific memory..."
+        autocomplete="off"
+        spellcheck="false"
+        aria-label="Ask about your memories"
+      >
+      <button class="review-mic-btn" id="review-mic-btn" aria-label="Voice question">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3"/>
+          <path d="M5 11a7 7 0 0 0 14 0"/>
+          <line x1="12" y1="18" x2="12" y2="22"/>
+          <line x1="9" y1="22" x2="15" y2="22"/>
+        </svg>
+      </button>
+      <button class="review-send-btn" id="review-send-btn" aria-label="Send question" disabled>
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 8h12M9 3l5 5-5 5"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ========================
+       VOICE BUTTON
+  ========================= -->
+  <button class="voice-btn" aria-label="Start voice recording">
+    <svg class="voice-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="9" y="3" width="6" height="11" rx="3"/>
+      <path d="M5 11a7 7 0 0 0 14 0"/>
+      <line x1="12" y1="18" x2="12" y2="22"/>
+      <line x1="9" y1="22" x2="15" y2="22"/>
+    </svg>
+  </button>
+
+
+  <script>
+    /* ================================================
+       Mood switching
+    ================================================ */
+    const body       = document.body;
+    const moodBtns   = document.querySelectorAll('.mood-btn');
+
+    moodBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mood = btn.dataset.mood;
+        body.className = `mood-${mood}`;
+        moodBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    /* ================================================
+       Nav switching + view routing
+    ================================================ */
+    const navBtns        = document.querySelectorAll('.nav-btn');
+    const viewMemory     = document.getElementById('view-memory');
+    const viewReview     = document.getElementById('view-review');
+    const reviewInputBar = document.getElementById('review-input-bar');
+
+    function switchView(view) {
+      viewMemory.hidden = view !== 'memory';
+      viewReview.hidden = view !== 'review';
+
+      const voiceBtn = document.querySelector('.voice-btn');
+      if (view === 'review') {
+        voiceBtn.style.display = 'none';
+        reviewInputBar.classList.add('rv-visible');
+        document.getElementById('review-input')?.focus();
+      } else {
+        voiceBtn.style.display = '';
+        reviewInputBar.classList.remove('rv-visible');
+      }
+    }
+
+    navBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        navBtns.forEach(n => n.classList.remove('active'));
+        btn.classList.add('active');
+        // Sync mobile menu active state
+        document.querySelectorAll('.mm-nav-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.view === btn.dataset.view && !!btn.dataset.view);
+        });
+        if (btn.dataset.view) switchView(btn.dataset.view);
+      });
+    });
+
+    /* ================================================
+       Mobile hamburger menu
+    ================================================ */
+    const hamburgerBtn = document.getElementById('hamburger-btn');
+    const mobileMenu   = document.getElementById('mobile-menu');
+
+    function setMenuOpen(open) {
+      mobileMenu.classList.toggle('mm-open', open);
+      mobileMenu.setAttribute('aria-hidden', String(!open));
+      hamburgerBtn.setAttribute('aria-expanded', String(open));
+      hamburgerBtn.innerHTML = open
+        ? `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l10 10M14 4L4 14"/></svg>`
+        : `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 5h12M3 9h12M3 13h12"/></svg>`;
+    }
+
+    hamburgerBtn.addEventListener('click', () => {
+      setMenuOpen(!mobileMenu.classList.contains('mm-open'));
+    });
+
+    // Mobile nav buttons
+    const mmNavBtns = document.querySelectorAll('.mm-nav-btn');
+    mmNavBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        mmNavBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        // Sync main sidebar nav active state
+        navBtns.forEach(b => {
+          b.classList.toggle('active', b.dataset.view === btn.dataset.view && !!btn.dataset.view);
+        });
+        if (btn.dataset.view) switchView(btn.dataset.view);
+        setMenuOpen(false);
+      });
+    });
+
+    // Mobile mood buttons
+    const mmMoodBtns = document.querySelectorAll('.mm-mood-btn');
+    mmMoodBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mood = btn.dataset.mood;
+        body.className = `mood-${mood}`;
+        moodBtns.forEach(b => b.classList.remove('active'));
+        document.querySelector(`.mood-btn[data-mood="${mood}"]`)?.classList.add('active');
+        mmMoodBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        setMenuOpen(false);
+      });
+    });
+
+    // Close menu on outside click
+    document.addEventListener('click', e => {
+      if (mobileMenu.classList.contains('mm-open') &&
+          !mobileMenu.contains(e.target) &&
+          !hamburgerBtn.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    });
+
+    /* ================================================
+       Card animation — staggered load + scroll-triggered
+    ================================================ */
+    const cards = document.querySelectorAll('.entry-card');
+
+    cards.forEach((card, i) => {
+      card.parentElement.style.zIndex = cards.length - i;
+      card.dataset.loadDelay = i * 100;
+    });
+
+    const loadPhaseDuration = cards.length * 100 + 600;
+    let loadPhaseOver = false;
+    setTimeout(() => {
+      loadPhaseOver = true;
+      cards.forEach(card => {
+        if (!card.dataset.animated) card.style.animationDelay = '0ms';
+      });
+    }, loadPhaseDuration);
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && !entry.target.dataset.animated) {
+          const card = entry.target;
+          card.dataset.animated = '1';
+          card.style.animationDelay = loadPhaseOver ? '0ms' : card.dataset.loadDelay + 'ms';
+          card.style.animationPlayState = 'running';
+          observer.unobserve(card);
+        }
+      });
+    }, { threshold: 0.2 });
+
+    cards.forEach(card => observer.observe(card));
+
+    /* ================================================
+       Voice input — Web Speech API + Claude extraction
+    ================================================ */
+    (function () {
+      'use strict';
+
+      const micBtn      = document.querySelector('.voice-btn');
+      const apiKeyBtn   = document.querySelector('.api-key-btn');
+      const STORAGE_KEY = 'anthropic_api_key';
+      const MODEL       = 'claude-haiku-4-5-20251001';
+      const API_URL     = 'https://api.anthropic.com/v1/messages';
+
+      const SYSTEM_PROMPT = `You are processing voice input from a product designer reflecting on their work. Extract structured information and return ONLY valid JSON with no markdown formatting or preamble.
+
+Categories:
+- DECISION: a choice made about the product
+- PUSHBACK: disagreement or resistance to a proposed approach
+- OBSERVATION: something noticed about user behavior or the product
+- EDGE_CASE: an unusual scenario or corner case identified
+- RATIONALE: explanation of why something works a certain way
+
+Extract:
+- category: one of the above categories (uppercase)
+- statement: the main point in one clear sentence
+- context: relevant background (1-2 sentences, can be empty string if not needed)
+- tags: 2-4 relevant lowercase hyphenated tags
+
+Return as JSON:
+{
+  "category": "DECISION",
+  "statement": "...",
+  "context": "...",
+  "tags": ["tag-one", "tag-two"]
+}`;
+
+      // ── Mic button state ─────────────────────────────────────────────────
+      function setMicState(state) {
+        micBtn.classList.remove('voice-btn--recording', 'voice-btn--processing', 'voice-btn--error');
+        micBtn.disabled = (state === 'processing');
+        if (state !== 'default') micBtn.classList.add('voice-btn--' + state);
+      }
+
+      // ── Toast ─────────────────────────────────────────────────────────────
+      function showToast(message) {
+        let toast = document.getElementById('recall-toast');
+        if (!toast) {
+          toast = document.createElement('div');
+          toast.id = 'recall-toast';
+          toast.className = 'recall-toast';
+          document.body.appendChild(toast);
+        }
+        toast.textContent = message;
+        toast.classList.add('recall-toast--visible');
+        clearTimeout(toast._t);
+        toast._t = setTimeout(() => toast.classList.remove('recall-toast--visible'), 4000);
+      }
+
+      // ── API key storage ───────────────────────────────────────────────────
+      const getKey  = ()      => localStorage.getItem(STORAGE_KEY) || '';
+      const saveKey = (key)   => localStorage.setItem(STORAGE_KEY, key.trim());
+
+      // ── API key modal ─────────────────────────────────────────────────────
+      function showKeyModal(onSaved) {
+        const existing = document.getElementById('api-key-modal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.id = 'api-key-modal';
+        modal.innerHTML = `
+          <div class="akm-backdrop"></div>
+          <div class="akm-panel">
+            <h3 class="akm-title">Anthropic API key</h3>
+            <p class="akm-desc">Recall uses Claude to extract structured memory from your voice notes.
+              Get your key from <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>.</p>
+            <input class="akm-input" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" value="${getKey()}">
+            <div class="akm-actions">
+              <button class="akm-cancel">Cancel</button>
+              <button class="akm-save">Save key</button>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
+
+        const input  = modal.querySelector('.akm-input');
+        const save   = modal.querySelector('.akm-save');
+        const cancel = modal.querySelector('.akm-cancel');
+        const bg     = modal.querySelector('.akm-backdrop');
+
+        requestAnimationFrame(() => modal.classList.add('akm-visible'));
+
+        function close() {
+          modal.classList.remove('akm-visible');
+          setTimeout(() => modal.remove(), 250);
+        }
+
+        save.addEventListener('click', () => {
+          const k = input.value.trim();
+          if (!k.startsWith('sk-')) { input.classList.add('akm-input--error'); return; }
+          saveKey(k);
+          close();
+          if (onSaved) onSaved(k);
+        });
+
+        cancel.addEventListener('click', close);
+        bg.addEventListener('click', close);
+
+        input.addEventListener('keydown', e => {
+          input.classList.remove('akm-input--error');
+          if (e.key === 'Enter')  save.click();
+          if (e.key === 'Escape') close();
+        });
+
+        input.focus();
+        input.select();
+      }
+
+      // ── Claude API ────────────────────────────────────────────────────────
+      async function extract(transcription, apiKey) {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'x-api-key':     apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model:      MODEL,
+            max_tokens: 512,
+            system:     SYSTEM_PROMPT,
+            messages:   [{ role: 'user', content: transcription }]
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          const msg = err.error?.message || `API error ${res.status}`;
+          if (res.status === 401) throw new Error('invalid-key');
+          throw new Error(msg);
+        }
+
+        const data    = await res.json();
+        const rawText = data.content[0].text.trim();
+        const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+        try {
+          return JSON.parse(cleaned);
+        } catch {
+          console.error('Non-JSON from Claude:', rawText);
+          throw new Error('parse-failed');
+        }
+      }
+
+      // ── Card creation ─────────────────────────────────────────────────────
+      const CATEGORY_LABELS = {
+        DECISION: 'Decision', PUSHBACK: 'Pushback', OBSERVATION: 'Observation',
+        EDGE_CASE: 'Edge case', RATIONALE: 'Rationale'
+      };
+      const WIDE_CATEGORIES = new Set(['DECISION', 'PUSHBACK']);
+
+      function esc(str) {
+        const d = document.createElement('div');
+        d.textContent = str || '';
+        return d.innerHTML;
+      }
+
+      function nowTime() {
+        return new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      }
+
+      function buildEntry(data) {
+        const isWide = WIDE_CATEGORIES.has(data.category);
+        const label  = CATEGORY_LABELS[data.category] || data.category;
+
+        const tagsHTML    = (data.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join(' ');
+        const contextHTML = data.context ? `<p class="entry-context">${esc(data.context)}</p>` : '';
+
+        const entry = document.createElement('div');
+        entry.className = `entry entry--recent entry--d1 entry--age-today${isWide ? ' entry--wide' : ''}`;
+        entry.innerHTML = `
+          <div class="entry-card">
+            <div class="entry-meta">
+              <span class="project-tag">${esc(label)}</span>
+              <span class="entry-time">${nowTime()}</span>
+            </div>
+            <p class="entry-text">${esc(data.statement)}</p>
+            ${contextHTML}
+            <div class="entry-tags">${tagsHTML}</div>
+          </div>`;
+        addCardActions(entry.querySelector('.entry-card'));
+        return entry;
+      }
+
+      function insertNewCard(entry) {
+        const timeline = document.querySelector('.timeline');
+
+        // Find Today divider and insert immediately after it
+        const todayDivider = Array.from(timeline.querySelectorAll('.section-divider'))
+          .find(d => d.querySelector('.divider-label')?.textContent.trim().toLowerCase() === 'today');
+
+        if (todayDivider) {
+          todayDivider.after(entry);
+        } else {
+          timeline.prepend(entry);
+        }
+
+        // Bump z-index of all entries so new card sits on top
+        const allEntries = timeline.querySelectorAll('.entry');
+        allEntries.forEach((e, i) => { e.style.zIndex = allEntries.length - i; });
+
+        // Set rotation custom property based on position
+        const idx  = Array.from(timeline.children).indexOf(entry);
+        const card = entry.querySelector('.entry-card');
+        card.style.setProperty('--rot', idx % 2 === 0 ? '-0.4deg' : '0.3deg');
+
+        // Drop in immediately — no stagger delay
+        card.style.animationDelay    = '0ms';
+        card.style.animationPlayState = 'running';
+      }
+
+      // ── Edit / delete infrastructure ──────────────────────────────────────
+
+      const EDIT_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.5 2.5a1.414 1.414 0 0 1 2 2L5 13l-3 1 1-3 8.5-8.5z"/></svg>`;
+      const DELETE_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 4 13 4"/><path d="M5 4V2h6v2"/><path d="M6 7v5M10 7v5"/><path d="M3 4l1 9a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-9"/></svg>`;
+
+      function addCardActions(card) {
+        const wrap = document.createElement('div');
+        wrap.className = 'card-actions';
+        wrap.innerHTML = `
+          <button class="card-action-btn" data-action="edit"   aria-label="Edit memory">${EDIT_SVG}</button>
+          <button class="card-action-btn" data-action="delete" aria-label="Delete memory">${DELETE_SVG}</button>`;
+        card.appendChild(wrap);
+      }
+
+      function initCardActions() {
+        document.querySelectorAll('.entry-card').forEach(addCardActions);
+      }
+
+      // ── Card data read/write ───────────────────────────────────────────────
+
+      function readCardData(entry) {
+        const card      = entry.querySelector('.entry-card');
+        const labelText = card.querySelector('.project-tag')?.textContent.trim() || '';
+        const category  = Object.keys(CATEGORY_LABELS).find(k => CATEGORY_LABELS[k] === labelText) || 'OBSERVATION';
+        const statement = card.querySelector('.entry-text')?.textContent.trim().replace(/\s+/g, ' ') || '';
+        const context   = card.querySelector('.entry-context')?.textContent.trim().replace(/\s+/g, ' ') || '';
+        const tags      = Array.from(card.querySelectorAll('.entry-tags .tag')).map(t => t.textContent.trim());
+        return { category, statement, context, tags };
+      }
+
+      function parseTags(str) {
+        return str.split(',')
+          .map(t => t.trim().toLowerCase().replace(/\s+/g, '-'))
+          .filter(Boolean);
+      }
+
+      function applyEntryData(entry, data) {
+        const card   = entry.querySelector('.entry-card');
+        const isWide = WIDE_CATEGORIES.has(data.category);
+
+        card.querySelector('.project-tag').textContent = CATEGORY_LABELS[data.category] || data.category;
+        card.querySelector('.entry-text').textContent  = data.statement;
+
+        // Context: create, update, or remove
+        let ctxEl = card.querySelector('.entry-context');
+        if (data.context) {
+          if (!ctxEl) {
+            ctxEl = document.createElement('p');
+            ctxEl.className = 'entry-context';
+            card.querySelector('.entry-text').after(ctxEl);
+          }
+          ctxEl.textContent = data.context;
+        } else if (ctxEl) {
+          ctxEl.remove();
+        }
+
+        // Tags
+        const tagsWrap = card.querySelector('.entry-tags');
+        tagsWrap.innerHTML = data.tags.map(t => `<span class="tag">${esc(t)}</span>`).join(' ');
+
+        // Wide class
+        entry.classList.toggle('entry--wide', isWide);
+
+        // Brief accent flash to acknowledge save
+        card.style.transition = 'border-color 0.15s ease';
+        card.style.borderColor = 'var(--accent)';
+        setTimeout(() => { card.style.borderColor = ''; card.style.transition = ''; }, 600);
+      }
+
+      // ── Delete animation ───────────────────────────────────────────────────
+
+      function deleteEntry(entry) {
+        const card = entry.querySelector('.entry-card');
+        // Override card animation with delete keyframe
+        card.style.animation = 'card-delete 0.3s ease forwards';
+
+        setTimeout(() => {
+          // Collapse the entry wrapper to slide other cards up
+          const h = entry.offsetHeight;
+          entry.style.overflow   = 'hidden';
+          entry.style.maxHeight  = h + 'px';
+          entry.style.transition = 'max-height 0.25s ease, margin-top 0.25s ease';
+          requestAnimationFrame(() => {
+            entry.style.maxHeight  = '0';
+            entry.style.marginTop  = '0';
+          });
+        }, 280);
+
+        setTimeout(() => entry.remove(), 580);
+      }
+
+      // ── Modal lifecycle ────────────────────────────────────────────────────
+
+      function trapFocus(wrap) {
+        const sel = 'button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])';
+        wrap.addEventListener('keydown', (e) => {
+          if (e.key !== 'Tab') return;
+          const nodes = Array.from(wrap.querySelectorAll(sel));
+          const first = nodes[0], last = nodes[nodes.length - 1];
+          if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+          else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
+        });
+      }
+
+      function openModal(wrap, firstFocusSelector) {
+        document.body.appendChild(wrap);
+        trapFocus(wrap);
+        const target = firstFocusSelector
+          ? wrap.querySelector(firstFocusSelector)
+          : wrap.querySelector('button, input, select, textarea');
+        if (target) setTimeout(() => target.focus(), 30);
+
+        const onEsc = (e) => { if (e.key === 'Escape') { closeModal(wrap); document.removeEventListener('keydown', onEsc); } };
+        document.addEventListener('keydown', onEsc);
+        wrap._onEsc = onEsc;
+      }
+
+      function closeModal(wrap) {
+        const modal = wrap.querySelector('.recall-modal');
+        if (!modal) { wrap.remove(); return; }
+        modal.classList.add('modal-out');
+        modal.addEventListener('animationend', () => {
+          document.removeEventListener('keydown', wrap._onEsc);
+          wrap.remove();
+        }, { once: true });
+      }
+
+      // ── Delete modal ───────────────────────────────────────────────────────
+
+      function showDeleteModal(entry) {
+        const raw     = entry.querySelector('.entry-text')?.textContent.trim() || '';
+        const preview = raw.length > 60 ? raw.slice(0, 60) + '…' : raw;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'recall-modal-wrap';
+        wrap.innerHTML = `
+          <div class="recall-modal-backdrop"></div>
+          <div class="recall-modal del-modal" role="dialog" aria-modal="true" aria-labelledby="del-title">
+            <h2 id="del-title">Delete this memory?</h2>
+            <p class="del-preview">"${esc(preview)}"</p>
+            <div class="del-actions">
+              <button class="del-cancel">Cancel</button>
+              <button class="del-confirm">Delete</button>
+            </div>
+          </div>`;
+
+        const close = () => closeModal(wrap);
+        wrap.querySelector('.recall-modal-backdrop').addEventListener('click', close);
+        wrap.querySelector('.del-cancel').addEventListener('click', close);
+        wrap.querySelector('.del-confirm').addEventListener('click', () => {
+          closeModal(wrap);
+          setTimeout(() => deleteEntry(entry), 120);
+        });
+
+        openModal(wrap, '.del-cancel');
+      }
+
+      // ── Edit modal ─────────────────────────────────────────────────────────
+
+      function showEditModal(entry) {
+        const data = readCardData(entry);
+
+        const optionsHTML = Object.entries(CATEGORY_LABELS).map(([k, v]) =>
+          `<option value="${k}"${data.category === k ? ' selected' : ''}>${v}</option>`
+        ).join('');
+
+        const wrap = document.createElement('div');
+        wrap.className = 'recall-modal-wrap';
+        wrap.innerHTML = `
+          <div class="recall-modal-backdrop"></div>
+          <div class="recall-modal edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+            <h2 id="edit-title">Edit memory</h2>
+            <div class="edit-field">
+              <label class="edit-label" for="em-category">Category</label>
+              <select class="edit-select" id="em-category">${optionsHTML}</select>
+            </div>
+            <div class="edit-field">
+              <label class="edit-label" for="em-statement">Memory</label>
+              <textarea class="edit-textarea edit-textarea--statement" id="em-statement" rows="4">${esc(data.statement)}</textarea>
+              <span class="edit-error" id="em-error">Memory cannot be empty.</span>
+            </div>
+            <div class="edit-field">
+              <label class="edit-label" for="em-context">Context <span class="edit-label-note">(optional)</span></label>
+              <textarea class="edit-textarea edit-textarea--context" id="em-context" rows="2">${esc(data.context)}</textarea>
+            </div>
+            <div class="edit-field">
+              <label class="edit-label" for="em-tags">Tags <span class="edit-label-note">(comma-separated)</span></label>
+              <input class="edit-input" id="em-tags" type="text" value="${esc(data.tags.join(', '))}">
+              <div class="edit-tag-preview"></div>
+            </div>
+            <div class="edit-actions">
+              <button class="edit-cancel">Cancel</button>
+              <button class="edit-save">Save</button>
+            </div>
+          </div>`;
+
+        const catEl      = wrap.querySelector('#em-category');
+        const stmtEl     = wrap.querySelector('#em-statement');
+        const ctxEl      = wrap.querySelector('#em-context');
+        const tagsEl     = wrap.querySelector('#em-tags');
+        const previewEl  = wrap.querySelector('.edit-tag-preview');
+        const errorEl    = wrap.querySelector('#em-error');
+
+        function renderTagPreview() {
+          const chips = parseTags(tagsEl.value);
+          previewEl.innerHTML = chips.map(t => `<span class="tag">${esc(t)}</span>`).join('');
+        }
+        tagsEl.addEventListener('input', renderTagPreview);
+        renderTagPreview();
+
+        const close = () => closeModal(wrap);
+        wrap.querySelector('.recall-modal-backdrop').addEventListener('click', close);
+        wrap.querySelector('.edit-cancel').addEventListener('click', close);
+
+        wrap.querySelector('.edit-save').addEventListener('click', () => {
+          const statement = stmtEl.value.trim();
+          if (!statement) {
+            errorEl.classList.add('edit-error--visible');
+            stmtEl.focus();
+            return;
+          }
+          errorEl.classList.remove('edit-error--visible');
+          applyEntryData(entry, {
+            category:  catEl.value,
+            statement,
+            context:   ctxEl.value.trim(),
+            tags:      parseTags(tagsEl.value),
+          });
+          closeModal(wrap);
+        });
+
+        openModal(wrap, '#em-statement');
+      }
+
+      // ── Card action event delegation ───────────────────────────────────────
+
+      document.querySelector('.timeline').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const entry = btn.closest('.entry');
+        if (!entry) return;
+        e.stopPropagation();
+        if (btn.dataset.action === 'edit')   showEditModal(entry);
+        if (btn.dataset.action === 'delete') showDeleteModal(entry);
+      });
+
+      initCardActions();
+
+      // ── Speech recognition ────────────────────────────────────────────────
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      function showTranscriptModal(apiKey) {
+        if (!SpeechRec) {
+          showToast('Speech recognition not supported. Try Chrome or Edge.');
+          return;
+        }
+
+        // Build modal DOM
+        const modal = document.createElement('div');
+        modal.id = 'transcript-modal';
+        modal.innerHTML = `
+          <div class="tm-backdrop"></div>
+          <div class="tm-panel">
+            <div class="tm-header">
+              <div class="tm-status-dot tm-pulse"></div>
+              <span class="tm-status-text">Recording…</span>
+            </div>
+            <textarea class="tm-textarea" placeholder="Your words will appear here…" spellcheck="false"></textarea>
+            <div class="tm-interim"></div>
+            <div class="tm-actions">
+              <button class="tm-cancel">Cancel</button>
+              <button class="tm-resume">Resume</button>
+              <button class="tm-save" disabled>Save</button>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
+
+        const dot      = modal.querySelector('.tm-status-dot');
+        const statusTx = modal.querySelector('.tm-status-text');
+        const textarea = modal.querySelector('.tm-textarea');
+        const interim  = modal.querySelector('.tm-interim');
+        const cancelBtn = modal.querySelector('.tm-cancel');
+        const resumeBtn = modal.querySelector('.tm-resume');
+        const saveBtn   = modal.querySelector('.tm-save');
+
+        let currentRec = null;
+        let isRecording = false;
+
+        function updateSaveState() {
+          saveBtn.disabled = textarea.value.trim().length === 0;
+        }
+
+        textarea.addEventListener('input', updateSaveState);
+
+        function setStatus(state) {
+          // state: 'recording' | 'paused' | 'processing'
+          if (state === 'recording') {
+            dot.classList.add('tm-pulse');
+            statusTx.textContent = 'Recording…';
+            resumeBtn.textContent = 'Pause';
+            resumeBtn.classList.remove('tm-resume--active');
+          } else if (state === 'paused') {
+            dot.classList.remove('tm-pulse');
+            statusTx.textContent = 'Paused — edit or tap Resume';
+            resumeBtn.textContent = 'Resume';
+            resumeBtn.classList.remove('tm-resume--active');
+          } else if (state === 'processing') {
+            dot.classList.add('tm-pulse');
+            statusTx.textContent = 'Saving…';
+          }
+        }
+
+        function startRec() {
+          if (isRecording) return;
+          const rec = new SpeechRec();
+          rec.continuous     = true;
+          rec.interimResults = true;
+          rec.lang           = 'en-US';
+          currentRec = rec;
+          isRecording = true;
+
+          rec.onresult = (event) => {
+            let interimText = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const chunk = event.results[i];
+              if (chunk.isFinal) {
+                textarea.value += (textarea.value ? ' ' : '') + chunk[0].transcript.trim();
+                updateSaveState();
+              } else {
+                interimText += chunk[0].transcript;
+              }
+            }
+            interim.textContent = interimText;
+          };
+
+          rec.onerror = (e) => {
+            isRecording = false;
+            currentRec = null;
+            interim.textContent = '';
+            const msgs = {
+              'not-allowed': 'Microphone access denied.',
+              'no-speech':   'No speech detected.',
+              'network':     'Network error.',
+            };
+            if (e.error !== 'no-speech') {
+              statusTx.textContent = msgs[e.error] || `Error: ${e.error}`;
+            }
+            setStatus('paused');
+          };
+
+          rec.onend = () => {
+            isRecording = false;
+            currentRec = null;
+            interim.textContent = '';
+            setStatus('paused');
+          };
+
+          rec.start();
+          setStatus('recording');
+        }
+
+        function stopRec() {
+          if (currentRec) {
+            try { currentRec.stop(); } catch (_) {}
+            currentRec = null;
+          }
+          isRecording = false;
+          interim.textContent = '';
+        }
+
+        function closeModal() {
+          stopRec();
+          modal.remove();
+          setMicState('default');
+        }
+
+        // Start recording immediately
+        setMicState('recording');
+        startRec();
+
+        // Cancel
+        cancelBtn.addEventListener('click', closeModal);
+        modal.querySelector('.tm-backdrop').addEventListener('click', closeModal);
+
+        // Resume / Pause toggle
+        resumeBtn.addEventListener('click', () => {
+          if (isRecording) {
+            stopRec();
+            setStatus('paused');
+          } else {
+            startRec();
+          }
+        });
+
+        // Save → extract → card
+        saveBtn.addEventListener('click', async () => {
+          const text = textarea.value.trim();
+          if (!text) return;
+          stopRec();
+          setStatus('processing');
+          saveBtn.disabled = true;
+          resumeBtn.disabled = true;
+          cancelBtn.disabled = true;
+
+          try {
+            const data  = await extract(text, apiKey);
+            const entry = buildEntry(data);
+            modal.remove();
+            insertNewCard(entry);
+            setMicState('default');
+          } catch (err) {
+            modal.remove();
+            setMicState('error');
+            if (err.message === 'invalid-key') {
+              showToast('API key invalid — click "API key" in the sidebar to update it.');
+            } else if (err.message === 'parse-failed') {
+              showToast('Extraction failed. Try speaking more clearly.');
+            } else if (!navigator.onLine) {
+              showToast('No network connection.');
+            } else {
+              showToast(`Error: ${err.message}`);
+            }
+            setTimeout(() => setMicState('default'), 2500);
+          }
+        });
+      }
+
+      // ── Event listeners ───────────────────────────────────────────────────
+      micBtn.addEventListener('click', () => {
+        if (micBtn.classList.contains('voice-btn--processing')) return;
+        if (micBtn.classList.contains('voice-btn--recording'))  return;
+
+        const key = getKey();
+        if (key) {
+          showTranscriptModal(key);
+        } else {
+          showKeyModal((k) => showTranscriptModal(k));
+        }
+      });
+
+      apiKeyBtn.addEventListener('click', () => showKeyModal(null));
+
+      // ── Review feature ────────────────────────────────────────────────────
+
+      const reviewInput   = document.getElementById('review-input');
+      const reviewSendBtn = document.getElementById('review-send-btn');
+      const reviewMessages = document.getElementById('review-messages');
+      const mainEl        = document.querySelector('.main');
+
+      // Conversation history for multi-turn context
+      let chatHistory = [];
+
+      const newConvoBtn = document.getElementById('new-convo-btn');
+
+      function setNewConvoBtnVisible(visible) {
+        newConvoBtn.classList.toggle('new-convo-btn--visible', visible);
+      }
+
+      newConvoBtn.addEventListener('click', () => {
+        // Fade out all messages
+        const msgs = reviewMessages.querySelectorAll('.rm-user, .rm-ai');
+        msgs.forEach(m => { m.style.transition = 'opacity 0.2s ease'; m.style.opacity = '0'; });
+
+        setTimeout(() => {
+          // Clear history and DOM
+          chatHistory = [];
+          reviewMessages.innerHTML = '';
+
+          // Re-inject empty state
+          const empty = document.createElement('div');
+          empty.className = 'review-empty';
+          empty.id = 'review-empty';
+          empty.innerHTML = `<div class="sq-grid">
+            <div class="sq-card" data-question="What patterns do I see in how I push back on features?">What patterns do I see in how I push back on features?</div>
+            <div class="sq-card" data-question="Show me times I've caught edge cases">Show me times I've caught edge cases</div>
+            <div class="sq-card" data-question="How do I handle disagreement with stakeholders?">How do I handle disagreement with stakeholders?</div>
+            <div class="sq-card" data-question="What decisions have I made about progressive disclosure?">What decisions have I made about progressive disclosure?</div>
+            <div class="sq-card" data-question="When have I advocated for user needs over business goals?">When have I advocated for user needs over business goals?</div>
+          </div>`;
+          reviewMessages.appendChild(empty);
+
+          // Re-attach starter card listener (event delegation on the new element)
+          empty.addEventListener('click', starterCardHandler);
+
+          // Reset input and button
+          reviewInput.value = '';
+          reviewSendBtn.disabled = true;
+          setNewConvoBtnVisible(false);
+        }, 200);
+      });
+
+      // ── Collect memories from DOM ──────────────────────────────────────────
+      function collectMemories() {
+        return Array.from(document.querySelectorAll('.timeline .entry')).map((entry, i) => {
+          const card      = entry.querySelector('.entry-card');
+          const category  = card.querySelector('.project-tag')?.textContent.trim()  || '';
+          const time      = card.querySelector('.entry-time')?.textContent.trim()   || '';
+          const statement = card.querySelector('.entry-text')?.textContent.trim().replace(/\s+/g, ' ') || '';
+          const context   = card.querySelector('.entry-context')?.textContent.trim().replace(/\s+/g, ' ') || '';
+          const tags      = Array.from(card.querySelectorAll('.tag')).map(t => t.textContent.trim());
+          return { i: i + 1, category, time, statement, context, tags };
+        });
+      }
+
+      // ── Minimal markdown renderer ──────────────────────────────────────────
+      function renderMarkdown(text) {
+        return text
+          .split(/\n\n+/)
+          .map(block => {
+            const html = block
+              .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+              .replace(/\*(.+?)\*/g, '<em>$1</em>')
+              .replace(/\n/g, '<br>');
+            return `<p>${html}</p>`;
+          })
+          .join('');
+      }
+
+      // ── Chat UI helpers ────────────────────────────────────────────────────
+      function scrollReviewToBottom() {
+        mainEl.scrollTo({ top: mainEl.scrollHeight, behavior: 'smooth' });
+      }
+
+      function showTyping() {
+        const div = document.createElement('div');
+        div.className = 'rm-ai';
+        div.id = 'rm-typing';
+        div.innerHTML = `<div class="rm-ai-card rm-typing"><span class="rm-dot"></span><span class="rm-dot"></span><span class="rm-dot"></span></div>`;
+        reviewMessages.appendChild(div);
+        scrollReviewToBottom();
+      }
+
+      function hideTyping() {
+        document.getElementById('rm-typing')?.remove();
+      }
+
+      function appendChatMessage(role, content) {
+        hideTyping();
+        // Remove empty state on first real message
+        document.getElementById('review-empty')?.remove();
+        setNewConvoBtnVisible(true);
+
+        const wrap = document.createElement('div');
+        if (role === 'user') {
+          wrap.className = 'rm-user';
+          wrap.innerHTML = `<div class="rm-user-bubble">${esc(content)}</div>`;
+        } else {
+          wrap.className = 'rm-ai';
+          wrap.innerHTML = `<div class="rm-ai-card rm-ai-content">${renderMarkdown(content)}</div>`;
+        }
+        reviewMessages.appendChild(wrap);
+        scrollReviewToBottom();
+      }
+
+      // ── Review API call ────────────────────────────────────────────────────
+      async function askReview(question) {
+        const key = getKey();
+        if (!key) {
+          showKeyModal(k => { saveKey(k); askReview(question); });
+          return;
+        }
+
+        chatHistory.push({ role: 'user', content: question });
+        appendChatMessage('user', question);
+        reviewInput.value = '';
+        reviewSendBtn.disabled = true;
+
+        showTyping();
+
+        const memories = collectMemories();
+        const memoriesText = memories.length
+          ? memories.map(m =>
+              `[${m.i}] ${m.category} | ${m.time}\nStatement: ${m.statement}` +
+              (m.context ? `\nContext: ${m.context}` : '') +
+              (m.tags.length ? `\nTags: ${m.tags.join(', ')}` : '')
+            ).join('\n\n')
+          : 'No memories logged yet.';
+
+        const systemPrompt =
+          `You are helping a product designer search and reflect on their logged work memories. ` +
+          `When they ask a question, search through the memories provided for relevant examples. ` +
+          `Return 2-4 specific memories with dates and key quotes, then provide synthesis ` +
+          `highlighting patterns or connections. Be concise and specific. ` +
+          `Format responses using markdown: **bold** for memory titles or key terms.\n\n` +
+          `Here are the designer's logged memories:\n\n${memoriesText}`;
+
+        try {
+          const res = await fetch(API_URL, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-api-key': key,
+              'anthropic-version': '2023-06-01',
+              'anthropic-dangerous-direct-browser-access': 'true',
+            },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5-20251001',
+              max_tokens: 1024,
+              system: systemPrompt,
+              messages: chatHistory,
+            }),
+          });
+
+          if (res.status === 401) throw new Error('invalid-key');
+          if (!res.ok) throw new Error(`api-${res.status}`);
+
+          const json  = await res.json();
+          const reply = json.content?.[0]?.text?.trim();
+          if (!reply) throw new Error('empty-response');
+
+          chatHistory.push({ role: 'assistant', content: reply });
+          appendChatMessage('assistant', reply);
+        } catch (err) {
+          hideTyping();
+          chatHistory.pop(); // Remove the failed user message from history
+          if (err.message === 'invalid-key') {
+            showToast('API key invalid — click "API key" in the sidebar to update it.');
+          } else {
+            showToast('Review failed. Check your connection and try again.');
+          }
+        }
+      }
+
+      // ── Starter question cards ────────────────────────────────────────────
+      function starterCardHandler(e) {
+        const card = e.target.closest('.sq-card');
+        if (!card) return;
+        const question = card.dataset.question;
+        reviewInput.value = question;
+        reviewSendBtn.disabled = false;
+        askReview(question);
+      }
+      document.getElementById('review-empty').addEventListener('click', starterCardHandler);
+
+      // ── Review voice input ────────────────────────────────────────────────
+      const reviewMicBtn = document.getElementById('review-mic-btn');
+
+      function setReviewMicState(recording) {
+        reviewMicBtn.classList.toggle('review-mic-btn--recording', recording);
+      }
+
+      function showReviewTranscriptModal() {
+        if (!SpeechRec) {
+          showToast('Speech recognition not supported. Try Chrome or Edge.');
+          return;
+        }
+
+        const modal = document.createElement('div');
+        modal.id = 'transcript-modal';
+        modal.innerHTML = `
+          <div class="tm-backdrop"></div>
+          <div class="tm-panel">
+            <div class="tm-header">
+              <div class="tm-status-dot tm-pulse"></div>
+              <span class="tm-status-text">Recording…</span>
+            </div>
+            <textarea class="tm-textarea" placeholder="Your question will appear here…" spellcheck="false"></textarea>
+            <div class="tm-interim"></div>
+            <div class="tm-actions">
+              <button class="tm-cancel">Cancel</button>
+              <button class="tm-resume">Resume</button>
+              <button class="tm-save" disabled>Ask</button>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
+
+        const dot       = modal.querySelector('.tm-status-dot');
+        const statusTx  = modal.querySelector('.tm-status-text');
+        const textarea  = modal.querySelector('.tm-textarea');
+        const interim   = modal.querySelector('.tm-interim');
+        const cancelBtn = modal.querySelector('.tm-cancel');
+        const resumeBtn = modal.querySelector('.tm-resume');
+        const saveBtn   = modal.querySelector('.tm-save');
+
+        let currentRec = null;
+        let isRecording = false;
+
+        function updateSaveState() {
+          saveBtn.disabled = textarea.value.trim().length === 0;
+        }
+        textarea.addEventListener('input', updateSaveState);
+
+        function setStatus(state) {
+          if (state === 'recording') {
+            dot.classList.add('tm-pulse');
+            statusTx.textContent = 'Recording…';
+            resumeBtn.textContent = 'Pause';
+          } else if (state === 'paused') {
+            dot.classList.remove('tm-pulse');
+            statusTx.textContent = 'Paused — edit or tap Resume';
+            resumeBtn.textContent = 'Resume';
+          }
+        }
+
+        function startRec() {
+          if (isRecording) return;
+          const rec = new SpeechRec();
+          rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+          currentRec = rec; isRecording = true;
+
+          rec.onresult = (event) => {
+            let interimText = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const chunk = event.results[i];
+              if (chunk.isFinal) {
+                textarea.value += (textarea.value ? ' ' : '') + chunk[0].transcript.trim();
+                updateSaveState();
+              } else { interimText += chunk[0].transcript; }
+            }
+            interim.textContent = interimText;
+          };
+
+          rec.onerror = (e) => {
+            isRecording = false; currentRec = null; interim.textContent = '';
+            const msgs = { 'not-allowed': 'Microphone access denied.', 'no-speech': 'No speech detected.', 'network': 'Network error.' };
+            if (e.error !== 'no-speech') statusTx.textContent = msgs[e.error] || `Error: ${e.error}`;
+            setStatus('paused');
+          };
+
+          rec.onend = () => {
+            isRecording = false; currentRec = null;
+            interim.textContent = '';
+            setStatus('paused');
+          };
+
+          rec.start();
+          setStatus('recording');
+        }
+
+        function stopRec() {
+          if (currentRec) { try { currentRec.stop(); } catch (_) {} currentRec = null; }
+          isRecording = false; interim.textContent = '';
+        }
+
+        function closeModal() {
+          stopRec();
+          modal.remove();
+          setReviewMicState(false);
+        }
+
+        setReviewMicState(true);
+        startRec();
+
+        cancelBtn.addEventListener('click', closeModal);
+        modal.querySelector('.tm-backdrop').addEventListener('click', closeModal);
+
+        resumeBtn.addEventListener('click', () => {
+          if (isRecording) { stopRec(); setStatus('paused'); }
+          else { startRec(); }
+        });
+
+        saveBtn.addEventListener('click', () => {
+          const text = textarea.value.trim();
+          if (!text) return;
+          stopRec();
+          modal.remove();
+          setReviewMicState(false);
+          reviewInput.value = '';
+          reviewSendBtn.disabled = true;
+          askReview(text);
+        });
+      }
+
+      reviewMicBtn.addEventListener('click', () => {
+        if (reviewMicBtn.classList.contains('review-mic-btn--recording')) return;
+        showReviewTranscriptModal();
+      });
+
+      // ── Review input event listeners ───────────────────────────────────────
+      reviewInput.addEventListener('input', () => {
+        reviewSendBtn.disabled = reviewInput.value.trim().length === 0;
+      });
+
+      reviewInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && reviewInput.value.trim()) {
+          e.preventDefault();
+          askReview(reviewInput.value.trim());
+        }
+      });
+
+      reviewSendBtn.addEventListener('click', () => {
+        const q = reviewInput.value.trim();
+        if (q) askReview(q);
+      });
+
+    }());
+
+    // ── Service worker registration ───────────────────────────────────────────
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+      });
+    }
+
+    // ── PWA install prompt ────────────────────────────────────────────────────
+    let _installPrompt = null;
+    const INSTALL_KEY = 'recall_install_dismissed';
+
+    function showInstallBanner() {
+      if (document.getElementById('install-banner')) return;
+      if (localStorage.getItem(INSTALL_KEY)) return;
+
+      const banner = document.createElement('div');
+      banner.id = 'install-banner';
+      banner.className = 'install-banner';
+      banner.innerHTML =
+        `<span>Add Recall to your home screen for the full experience.</span>` +
+        `<button class="install-btn" id="install-yes">Install</button>` +
+        `<button class="install-dismiss" id="install-no" aria-label="Dismiss">×</button>`;
+      document.body.appendChild(banner);
+
+      document.getElementById('install-yes').addEventListener('click', () => {
+        _installPrompt?.prompt();
+        banner.remove();
+        localStorage.setItem(INSTALL_KEY, '1');
+      });
+      document.getElementById('install-no').addEventListener('click', () => {
+        banner.remove();
+        localStorage.setItem(INSTALL_KEY, '1');
+      });
+    }
+
+    // Android/Chrome install prompt
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      _installPrompt = e;
+      // Only show if not already installed
+      if (!window.matchMedia('(display-mode: standalone)').matches) {
+        setTimeout(showInstallBanner, 3000);
+      }
+    });
+
+    // iOS Safari: show manual instructions if in mobile Safari (no beforeinstallprompt)
+    (function checkIOSInstall() {
+      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      const isStandalone = window.navigator.standalone === true;
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      if (isIOS && isSafari && !isStandalone && !localStorage.getItem(INSTALL_KEY)) {
+        setTimeout(() => {
+          if (document.getElementById('install-banner')) return;
+          const banner = document.createElement('div');
+          banner.id = 'install-banner';
+          banner.className = 'install-banner';
+          banner.innerHTML =
+            `<span>Tap <strong>Share</strong> then <strong>Add to Home Screen</strong> to install Recall.</span>` +
+            `<button class="install-dismiss" id="install-no" aria-label="Dismiss">×</button>`;
+          document.body.appendChild(banner);
+          document.getElementById('install-no').addEventListener('click', () => {
+            banner.remove();
+            localStorage.setItem(INSTALL_KEY, '1');
+          });
+        }, 4000);
+      }
+    }());
+
+  </script>
+
+</body>
+</html>
